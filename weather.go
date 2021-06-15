@@ -1,11 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/url"
 	"os"
 	"time"
 
+	"github.com/MichaelS11/go-dht"
 	aio "github.com/jakefau/goAdafruit"
 	"github.com/jakefau/rpi-devices/dev"
 	"golang.org/x/exp/io/i2c"
@@ -42,34 +44,44 @@ func main() {
 	pressFeed := getFeed("weather.pressure", client)
 	oTempFeed := getFeed("outdoor.temperature", client)
 	oHumidFeed := getFeed("outdoor.humidity", client)
-
+	//bme280
 	d, err := i2c.Open(&i2c.Devfs{Dev: "/dev/i2c-1"}, 0x77)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	b := dev.New(d)
 	err = b.Init()
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	dht := dev.NewDHT11()
+	err = dht.HostInit()
+	if err != nil {
+		log.Fatal("HostInit error:", err)
+		return
+	}
+	dht, err := dht.NewDHT("GPIO26", dht.Fahrenheit, "")
+	if err != nil {
+		fmt.Println("NewDHT error:", err)
+		return
+	}
 
 	if io == "indoor" {
+		log.Println("Starting Indoor Loop")
 		for {
 			t, p, h, _ := b.EnvData()
 			client.SetFeed(tempFeed)
 			client.Data.Create(&aio.Data{Value: convert64(toFahrenheit(t))})
 			client.SetFeed(humidFeed)
-			client.Data.Create(&aio.Data{Value: convert64(toMercury(h))})
+			client.Data.Create(&aio.Data{Value: convert64(h)})
 			client.SetFeed(pressFeed)
-			client.Data.Create(&aio.Data{Value: convert64(p)})
+			client.Data.Create(&aio.Data{Value: convert64(toMercury(p))})
 			log.Printf("Temp: %fF, Press: %f, Hum: %f%%\n", toFahrenheit(t), toMercury(p), h)
 			time.Sleep(time.Second * 20)
 		}
 	} else {
+		log.Println("Starting Outdoor Loop")
 		for {
-			t, h, _ := dht.TempHumidity()
+			h, t, _ := dht.ReadRetry(11)
 			client.SetFeed(oTempFeed)
 			client.Data.Create(&aio.Data{Value: convert64(toFahrenheit(t))})
 			client.SetFeed(oHumidFeed)
